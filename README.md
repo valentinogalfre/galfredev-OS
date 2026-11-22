@@ -213,7 +213,7 @@ juegos, además, Node 20 o más nuevo.
 
 ```sh
 ./gradlew assembleDebug        # el APK queda en app/build/outputs/apk/debug/
-./gradlew testDebugUnitTest    # 485 tests de contrato
+./gradlew testDebugUnitTest    # 487 tests de contrato
 ./gradlew lintDebug            # los errores frenan la compilación
 
 cd game
