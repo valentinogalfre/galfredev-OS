@@ -15,7 +15,7 @@ android {
         // un ícono adaptativo 100% vectorial (sin PNGs por densidad).
         minSdk = 26
         targetSdk = 35
-        versionName = "1.4.0"
+        versionName = "1.4.1"
         // Sale de la versión: 1.4.0 es 10400. Nunca baja, así Android acepta cada actualización.
         versionCode = versionName!!.split(".").map(String::toInt).let { (a, b, c) ->
             require(b < 100 && c < 100) { "versionName $versionName: menor y parche tienen que ser menores que 100" }

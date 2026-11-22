@@ -383,9 +383,11 @@ Mac, en la misma red. **Hacelo todo de una vez y sin apagar el proyector.**
    adb shell cmd package set-home-activity ar.vale.projectorlauncher/.LauncherActivity
    ```
 
-   Para Control total:
+   Para Control total. La primera línea le deja a galfredev OS volver a prenderlo solo si Android
+   lo apaga (pasa al reinstalar o al forzar la detención), así no hay que repetir esto:
 
    ```sh
+   adb shell pm grant ar.vale.projectorlauncher android.permission.WRITE_SECURE_SETTINGS
    adb shell settings put secure enabled_accessibility_services ar.vale.projectorlauncher/ar.vale.projectorlauncher.remote.RemoteAccessibility
    adb shell settings put secure accessibility_enabled 1
    ```

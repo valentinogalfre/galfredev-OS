@@ -175,7 +175,7 @@ class RemoteActivity : GdActivity() {
             options.add(Sheet.Option(getString(R.string.remote_full_open), R.drawable.ic_arrow) { openExternal(settings, null) })
         }
         options.add(Sheet.Option(getString(R.string.back)) {})
-        val component = "$packageName/${RemoteAccessibility::class.java.name}"
+        val component = FullControl.component(this)
         val body = if (settings != null) {
             getString(R.string.remote_full_body)
         } else {

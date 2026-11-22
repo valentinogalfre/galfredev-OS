@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Sin este permiso, el diálogo de desinstalar se cierra solo y sin avisar. -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Control total se vuelve a prender solo. Se da una vez por ADB: pm grant ... WRITE_SECURE_SETTINGS. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Explorador de archivos y reproductor: acceso a USB / memoria. -->
     <uses-permission

@@ -35,6 +35,7 @@ FAILED=0
 if "$ADB" -s "$DEV" install -r "$APK"; then
   sh_ cmd package set-home-activity "$PKG/.LauncherActivity" > /dev/null
   # Reinstalar apaga el servicio de accesibilidad: sin esto se pierde el manejo de otras apps.
+  sh_ pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS
   sh_ settings put secure enabled_accessibility_services "$A11Y"
   sh_ settings put secure accessibility_enabled 1
   sh_ am start -a android.intent.action.MAIN -c android.intent.category.HOME > /dev/null
