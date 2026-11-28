@@ -70,8 +70,14 @@
     <string name="home_party_open">Abrir la juntada</string>
     <string name="home_race_open">Correr una carrera</string>
     <string name="home_futbol_open">Jugar un picadito</string>
+    <string name="home_gravedad_open">Jugar Gravedad</string>
+    <string name="home_boxhead_open">Jugar Boxhead: Horda</string>
     <string name="futbol_off">El fútbol usa la conexión con el celular, que está apagada.\n\nApretá OK para encenderla.</string>
     <string name="futbol_no_webview">Este equipo no tiene el componente del sistema que muestra páginas (WebView), y el fútbol lo necesita.</string>
+    <string name="gravedad_off">Gravedad usa la conexión con el celular, que está apagada.\n\nApretá OK para encenderla.</string>
+    <string name="gravedad_no_webview">Este equipo no tiene el componente del sistema que muestra páginas (WebView), y Gravedad lo necesita.</string>
+    <string name="boxhead_off">Boxhead usa la conexión con el celular, que está apagada.\n\nApretá OK para encenderla.</string>
+    <string name="boxhead_no_webview">Este equipo no tiene el componente del sistema que muestra páginas (WebView), y Boxhead lo necesita.</string>
     <string name="carrera_off">La carrera usa la conexión con el celular, que está apagada.\n\nApretá OK para encenderla.</string>
     <string name="carrera_failed">No se pudo encender la conexión con el celular.\n\nApretá OK para probar de nuevo.</string>
     <string name="carrera_no_webview">Este equipo no tiene el componente del sistema que muestra páginas (WebView), y la carrera lo necesita.</string>

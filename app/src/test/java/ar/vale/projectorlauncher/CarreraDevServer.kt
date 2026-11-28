@@ -30,5 +30,11 @@ fun main(args: Array<String>) {
     val play = "http://${args.getOrElse(1) { "127.0.0.1" }}:$port/carrera/jugador.html#r=${room.code}"
     println("FUTBOL http://127.0.0.1:$port/carrera/futbol.html#s=${room.hostSecret}&tls=0&qr=${CarreraActivity.qr(play)}")
     println("JUGADOR $play")
+    val grav = "http://${args.getOrElse(1) { "127.0.0.1" }}:$port/carrera/gravedad-celu.html#r=${room.code}"
+    println("GRAVEDAD http://127.0.0.1:$port/carrera/gravedad.html#s=${room.hostSecret}&tls=0&qr=${CarreraActivity.qr(grav)}")
+    println("GRAVEDAD_CELU $grav")
+    val box = "http://${args.getOrElse(1) { "127.0.0.1" }}:$port/carrera/boxhead-celu.html#r=${room.code}"
+    println("BOXHEAD http://127.0.0.1:$port/carrera/boxhead.html#s=${room.hostSecret}&tls=0&qr=${CarreraActivity.qr(box)}")
+    println("BOXHEAD_CELU $box")
     Thread.currentThread().join()
 }

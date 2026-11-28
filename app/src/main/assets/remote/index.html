@@ -1421,6 +1421,8 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { wa
 // El dueño lleva además el pase de mando: maneja la sala aunque no haya entrado primero.
 const RACE_PAGE = 'volante.html';
 const SOCCER_PAGE = 'jugador.html';
+const GRAVITY_PAGE = 'gravedad-celu.html';
+const BOXHEAD_PAGE = 'boxhead-celu.html';
 let raceDoor = null;
 let raceTimer = 0;
 async function watchRace() {
@@ -1432,7 +1434,11 @@ async function watchRace() {
   const open = raceDoor && raceDoor.open;
   // Abrirla en la pared es manejar el proyector: lo hace quien tiene el control. Entrar, cualquiera de la juntada.
   button.hidden = !open && !hasControl();
-  button.textContent = !open ? 'Correr una carrera' : raceDoor.page === SOCCER_PAGE ? 'Entrar al fútbol' : 'Entrar a la carrera';
+  button.textContent = !open ? 'Correr una carrera'
+    : raceDoor.page === SOCCER_PAGE ? 'Entrar al fútbol'
+    : raceDoor.page === GRAVITY_PAGE ? 'Entrar a Gravedad'
+    : raceDoor.page === BOXHEAD_PAGE ? 'Entrar a Boxhead'
+    : 'Entrar a la carrera';
   if (!document.hidden) raceTimer = setTimeout(watchRace, open ? 6000 : 3000);
 }
 function enterRace() {
