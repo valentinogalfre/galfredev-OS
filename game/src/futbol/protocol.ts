@@ -18,9 +18,15 @@ export const KITS: { name: string; color: number; ink: number }[] = [
 ];
 
 /** Minutos de cada partido; 0 es sin reloj. */
-export const MINUTES = [3, 5, 7, 10, 0];
+export const MINUTES = [2, 3, 5, 7, 10, 0];
 /** Goles para ganar; 0 es sin límite. */
 export const GOALS = [3, 5, 7, 10, 0];
+/** Ritmo de juego: velocidad y potencia de patada. */
+export const TEMPOS: { name: string; speed: number; kick: number }[] = [
+  { name: 'Normal', speed: 1, kick: 1 },
+  { name: 'Rápido', speed: 1.15, kick: 1.1 },
+  { name: 'Turbo', speed: 1.3, kick: 1.2 },
+];
 
 export interface Seat {
   id: number;
@@ -38,6 +44,7 @@ export interface Shared {
   field: string;
   minutes: number;
   goals: number;
+  tempo: string;
   /** Qué camiseta de KITS lleva cada equipo. */
   kits: [number, number];
   players: Seat[];
@@ -54,7 +61,7 @@ export interface Shared {
 
 /** Lo que pide el que lidera la sala. */
 export type Command =
-  | { a: 'field'; d: 1 | -1 } | { a: 'time'; d: 1 | -1 } | { a: 'goals'; d: 1 | -1 }
+  | { a: 'field'; d: 1 | -1 } | { a: 'time'; d: 1 | -1 } | { a: 'goals'; d: 1 | -1 } | { a: 'tempo'; d: 1 | -1 }
   | { a: 'kit'; team: 0 | 1; d: 1 | -1 } | { a: 'shuffle' } | { a: 'start' } | { a: 'stop' } | { a: 'pause' } | { a: 'exit' };
 
 /** Lo que pide cualquiera en la sala: su equipo y lo que lleva escrito. */
