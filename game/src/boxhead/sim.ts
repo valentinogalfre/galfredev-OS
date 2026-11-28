@@ -128,10 +128,16 @@ export interface Prop {
 
 export interface Crate {
   id: number;
-  kind: 'ammo' | 'med';
+  kind: 'ammo' | 'med' | 'supply';
   x: number;
   y: number;
   life: number;
+}
+
+export interface SupplyBeacon {
+  x: number;
+  y: number;
+  timer: number;
 }
 
 export type SimEvent =
@@ -188,14 +194,25 @@ export function buildArenaWalls(arena: ArenaId): Rect[] {
       { x: 560, y: 270, w: 160, h: 36 },
       { x: 560, y: 414, w: 160, h: 36 },
     );
-  } else {
-    // estacion
+  } else if (arena === 'estacion') {
     walls.push(
       { x: 350, y: 120, w: 44, h: 190 },
       { x: 350, y: 410, w: 44, h: 190 },
       { x: 886, y: 120, w: 44, h: 190 },
       { x: 886, y: 410, w: 44, h: 190 },
       { x: 590, y: 315, w: 100, h: 90 },
+    );
+  } else {
+    // cementerio: criptas y lápidas en diagonal para rodear a la horda.
+    walls.push(
+      { x: 250, y: 165, w: 92, h: 54 },
+      { x: 938, y: 165, w: 92, h: 54 },
+      { x: 250, y: 501, w: 92, h: 54 },
+      { x: 938, y: 501, w: 92, h: 54 },
+      { x: 510, y: 215, w: 54, h: 90 },
+      { x: 716, y: 415, w: 54, h: 90 },
+      { x: 716, y: 215, w: 54, h: 48 },
+      { x: 510, y: 457, w: 54, h: 48 },
     );
   }
   return walls;
@@ -219,6 +236,7 @@ export class BoxheadSim {
   projectiles: Projectile[] = [];
   props: Prop[] = [];
   crates: Crate[] = [];
+  supplyBeacon: SupplyBeacon | null = null;
   events: SimEvent[] = [];
 
   wave = 1;
@@ -232,6 +250,7 @@ export class BoxheadSim {
   private nextId = 1;
   private toSpawn = 0;
   private spawnCd = 0;
+  private nextSupplyT = 14;
 
   constructor(arena: ArenaId, mode: ModeId, friendlyFire: boolean, seeds: PlayerSeed[], seed = Date.now()) {
     this.arena = arena;
@@ -469,6 +488,30 @@ export class BoxheadSim {
       this.gameOver = true;
       this.events.push({ kind: 'gameOver' });
       return;
+    }
+
+    // Baliza interactiva de Caja de Suministros dorada.
+    if (this.supplyBeacon) {
+      this.supplyBeacon.timer -= dt;
+      if (this.supplyBeacon.timer <= 0) {
+        const bx = this.supplyBeacon.x;
+        const by = this.supplyBeacon.y;
+        this.supplyBeacon = null;
+        this.crates.push({ id: this.nextId++, kind: 'supply', x: bx, y: by, life: 22 });
+        this.events.push({ kind: 'pickup', x: bx, y: by, label: '¡SUMINISTROS!', color: '#ffd447' });
+      }
+    } else if (this.time >= this.nextSupplyT && this.enemies.length > 0) {
+      this.nextSupplyT = this.time + 20;
+      const spots = [
+        { x: 640, y: 140 },
+        { x: 640, y: 580 },
+        { x: 460, y: 360 },
+        { x: 820, y: 360 },
+      ];
+      const pick = spots[Math.floor(this.rng() * spots.length)];
+      if (!this.hitsAnyWall(pick.x, pick.y, 24)) {
+        this.supplyBeacon = { x: pick.x, y: pick.y, timer: 3.5 };
+      }
     }
 
     // Oleada limpia -> elegir mejoras.
@@ -1056,7 +1099,17 @@ export class BoxheadSim {
         const dx = p.x - c.x;
         const dy = p.y - c.y;
         if (dx * dx + dy * dy <= (PLAYER_R + 18) * (PLAYER_R + 18)) {
-          if (c.kind === 'med') {
+          if (c.kind === 'supply') {
+            p.hp = Math.min(p.maxHp, p.hp + 40);
+            p.score += 150;
+            for (let w = 0; w < p.unlocked.length; w++) {
+              const wid = p.unlocked[w];
+              const spec = WEAPON_BY_ID[wid];
+              if (spec.maxAmmo > 0) p.ammo[wid] = Math.min(spec.maxAmmo, p.ammo[wid] + Math.ceil(spec.maxAmmo * 0.65));
+            }
+            if (p.unlocked.includes('barrel')) p.ammo.barrel = Math.min(WEAPON_BY_ID.barrel.maxAmmo, p.ammo.barrel + 2);
+            this.events.push({ kind: 'pickup', x: c.x, y: c.y, label: '¡SUMINISTRO +150!', color: '#ffd447' });
+          } else if (c.kind === 'med') {
             p.hp = Math.min(p.maxHp, p.hp + 45);
             this.events.push({ kind: 'pickup', x: c.x, y: c.y, label: '+45 HP', color: '#7dff6b' });
           } else {

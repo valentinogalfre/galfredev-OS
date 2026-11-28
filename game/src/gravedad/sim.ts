@@ -15,7 +15,7 @@ const FLOOR_Y = 588;
 const CEIL_Y = 132;
 const MID_Y = 360;
 
-export type PlatKind = 'solid' | 'moving' | 'crumble';
+export type PlatKind = 'solid' | 'moving' | 'crumble' | 'boost';
 
 export interface Platform {
   id: number;
@@ -212,110 +212,203 @@ export class GravitySim {
     return p;
   }
 
-  /** Genera segmentos jugables por delante de la cámara, siempre garantizando al menos un camino seguro. */
+  private pickPower(): PowerKind {
+    const kinds: PowerKind[] = ['escudo', 'pulso', 'turbo', 'doble', 'quiebre'];
+    return kinds[Math.floor(this.rng() * kinds.length)];
+  }
+
+  /** Genera bloques de obstáculos diseñados a mano por mapa, siempre garantizando un camino jugable. */
   ensureAhead(targetX: number): void {
     while (this.genX < targetX) {
-      const difficulty = Math.min(1, this.genX / 14000);
-      const segW = Math.round(280 + this.rng() * 240);
-      const gap = Math.round(115 + difficulty * 65 + this.rng() * 55);
-      const safeSide: 1 | -1 = this.rng() < 0.62 ? (this.lastSafeSide === 1 ? -1 : 1) : this.lastSafeSide;
-      this.lastSafeSide = safeSide;
+      const difficulty = Math.min(1, this.genX / 13000);
+      const roll = this.rng();
 
-      const x0 = this.genX + gap;
-      const floorY = FLOOR_Y - Math.round((this.rng() - 0.3) * 55);
-      const ceilY = CEIL_Y + Math.round((this.rng() - 0.3) * 55);
-
-      const pickKind = (): PlatKind => {
-        if (this.map === 'caos' && this.rng() < 0.42) return 'crumble';
-        if (this.map === 'reactor' && this.rng() < 0.34) return 'moving';
-        if (this.map === 'caos' && this.rng() < 0.2) return 'moving';
-        return 'solid';
-      };
-
-      // Camino seguro principal en safeSide (con solapamiento para poder cambiar antes del hueco).
-      const safeKind = pickKind();
-      const safeY = safeSide === 1 ? floorY : ceilY - 28;
-      const safeAmp = safeKind === 'moving' ? 32 + this.rng() * 26 : 0;
-      const safeFreq = safeKind === 'moving' ? 1.6 + this.rng() * 1.1 : 0;
-      this.addPlatform(x0 - 45, safeY, segW + 60, 28, safeKind, safeAmp, safeFreq);
-
-      // Plataforma opuesta opcional (siempre dejando huecos claros para obligar a invertir).
-      if (this.rng() < 0.58) {
-        const oppKind = pickKind();
-        const oppW = Math.round(segW * (0.45 + this.rng() * 0.4));
-        const oppX = x0 + Math.round(this.rng() * (segW - oppW));
-        const oppY = safeSide === 1 ? ceilY - 28 : floorY;
-        const oppAmp = oppKind === 'moving' ? 28 + this.rng() * 22 : 0;
-        const oppFreq = oppKind === 'moving' ? 1.5 + this.rng() * 1.2 : 0;
-        this.addPlatform(oppX, oppY, oppW, 28, oppKind, oppAmp, oppFreq);
+      // Cada mapa favorece sus propios set-pieces memorables.
+      if (this.map === 'reactor' && roll < 0.34) {
+        this.genReactorElevator(difficulty);
+      } else if (this.map === 'inversor' && roll < 0.36) {
+        this.genPortalChasm(difficulty);
+      } else if (this.map === 'caos' && roll < 0.36) {
+        this.genFragileBridge(difficulty);
+      } else if (roll < 0.52) {
+        this.genDualRoute(difficulty);
+      } else if (roll < 0.68) {
+        this.genSlalom(difficulty);
+      } else if (roll < 0.84) {
+        this.genGravityStairs(difficulty);
+      } else {
+        this.genLowGVault(difficulty);
       }
-
-      // Isla intermedia en el centro para rutas rápidas o esquivar muros.
-      if (this.rng() < 0.42) {
-        const midW = Math.round(140 + this.rng() * 150);
-        const midX = x0 + Math.round(this.rng() * Math.max(40, segW - midW));
-        const midY = MID_Y + Math.round((this.rng() - 0.5) * 90);
-        this.addPlatform(midX, midY, midW, 24, this.map === 'caos' && this.rng() < 0.4 ? 'crumble' : 'solid');
-      }
-
-      // Escalón / bloque bajo que empuja a invertir antes de chocar.
-      if (difficulty > 0.15 && this.rng() < 0.32) {
-        const stepX = x0 + Math.round(segW * 0.45);
-        const stepH = 54;
-        const stepY = safeSide === 1 ? safeY - stepH : safeY + 28;
-        this.addPlatform(stepX, stepY, 34, stepH, 'solid');
-      }
-
-      // Mecánicas propias de cada mapa.
-      if ((this.map === 'reactor' || this.map === 'caos') && this.rng() < 0.28) {
-        this.zones.push({
-          id: this.nextId++,
-          x: x0,
-          y: CEIL_Y,
-          w: segW,
-          h: FLOOR_Y - CEIL_Y,
-          kind: 'lowg',
-        });
-      }
-      if ((this.map === 'inversor' || this.map === 'caos') && this.rng() < 0.34) {
-        this.zones.push({
-          id: this.nextId++,
-          x: x0 + Math.round(segW * 0.35),
-          y: CEIL_Y - 10,
-          w: 22,
-          h: FLOOR_Y - CEIL_Y + 20,
-          kind: 'flip',
-        });
-      }
-      if (this.map === 'inversor' && this.rng() < 0.26) {
-        const py = safeSide === 1 ? floorY - 56 : ceilY + 56;
-        const toY = safeSide === 1 ? ceilY + 62 : floorY - 62;
-        this.portals.push({
-          id: this.nextId++,
-          x: x0 + Math.round(segW * 0.5),
-          y: py,
-          toX: x0 + Math.round(segW * 0.5) + 120,
-          toY,
-          r: 26,
-        });
-      }
-
-      // Poder flotante en posición alcanzable.
-      if (this.rng() < 0.34) {
-        const kinds: PowerKind[] = ['escudo', 'pulso', 'turbo', 'doble', 'quiebre'];
-        const kind = kinds[Math.floor(this.rng() * kinds.length)];
-        const py = safeSide === 1 ? safeY - 48 : safeY + 28 + 48;
-        this.pickups.push({
-          id: this.nextId++,
-          x: x0 + Math.round(segW * (0.3 + this.rng() * 0.45)),
-          y: py,
-          kind,
-          taken: false,
-        });
-      }
-
-      this.genX = x0 + segW;
     }
+  }
+
+  /** Set-piece 1: Doble ruta riesgo/recompensa (camino seguro + isla central con poder garantizado). */
+  private genDualRoute(difficulty: number): void {
+    const gap = Math.round(115 + difficulty * 45);
+    const x0 = this.genX + gap;
+    const segW = 460;
+    const safeSide = this.lastSafeSide === 1 ? -1 : 1;
+    this.lastSafeSide = safeSide;
+
+    const safeY = safeSide === 1 ? FLOOR_Y : CEIL_Y - 28;
+    const oppY = safeSide === 1 ? CEIL_Y - 28 : FLOOR_Y;
+    this.addPlatform(x0 - 45, safeY, segW + 60, 28, 'solid');
+    this.addPlatform(x0 + 40, oppY, segW - 90, 28, this.rng() < 0.45 ? 'boost' : 'solid');
+
+    // Isla central elevada con poder garantizado para el que se anime a arriesgar.
+    const midKind: PlatKind = this.map === 'caos' ? 'crumble' : 'solid';
+    this.addPlatform(x0 + 130, MID_Y - 12, 190, 24, midKind);
+    this.pickups.push({
+      id: this.nextId++,
+      x: x0 + 225,
+      y: MID_Y - 46,
+      kind: this.pickPower(),
+      taken: false,
+    });
+    this.genX = x0 + segW;
+  }
+
+  /** Set-piece 2: Slalom clásico de G-Switch (alternancia rítmica piso/techo con rampas de velocidad). */
+  private genSlalom(difficulty: number): void {
+    let x = this.genX;
+    const steps = 3;
+    let side = this.lastSafeSide;
+    for (let s = 0; s < steps; s++) {
+      side = side === 1 ? -1 : 1;
+      const gap = Math.round(110 + difficulty * 40);
+      const w = Math.round(230 - difficulty * 35);
+      x += gap;
+      const y = side === 1 ? FLOOR_Y - (s % 2) * 26 : CEIL_Y - 28 + (s % 2) * 26;
+      const kind: PlatKind = s === 1 && this.rng() < 0.6 ? 'boost' : (this.map === 'caos' && this.rng() < 0.35 ? 'crumble' : 'solid');
+      this.addPlatform(x - 36, y, w + 48, 28, kind);
+      if (s === 1 && (this.map === 'inversor' || this.map === 'caos')) {
+        this.zones.push({ id: this.nextId++, x: x + w * 0.5, y: CEIL_Y - 10, w: 22, h: FLOOR_Y - CEIL_Y + 20, kind: 'flip' });
+      }
+      x += w;
+    }
+    this.lastSafeSide = side;
+    this.genX = x;
+  }
+
+  /** Set-piece 3: Escaleras de gravedad (terrazas ascendentes/descendentes con poder en la cima). */
+  private genGravityStairs(difficulty: number): void {
+    const gap = Math.round(110 + difficulty * 40);
+    const x0 = this.genX + gap;
+    const side: 1 | -1 = this.rng() < 0.5 ? 1 : -1;
+    this.lastSafeSide = side;
+
+    for (let i = 0; i < 3; i++) {
+      const px = x0 + i * 170;
+      const py = side === 1 ? FLOOR_Y - i * 44 : CEIL_Y - 28 + i * 44;
+      this.addPlatform(px - 28, py, 165, 26, i === 2 ? 'boost' : 'solid');
+    }
+    // Techo/piso opuesto de rescate al final.
+    const oppY = side === 1 ? CEIL_Y - 28 : FLOOR_Y;
+    this.addPlatform(x0 + 180, oppY, 310, 28, 'solid');
+    if (this.rng() < 0.65) {
+      this.pickups.push({
+        id: this.nextId++,
+        x: x0 + 390,
+        y: side === 1 ? FLOOR_Y - 140 : CEIL_Y + 140,
+        kind: this.pickPower(),
+        taken: false,
+      });
+    }
+    this.genX = x0 + 500;
+  }
+
+  /** Set-piece 4: Ascensor del Reactor (plataformas móviles en contrafase + campo baja-G). */
+  private genReactorElevator(difficulty: number): void {
+    const gap = Math.round(110 + difficulty * 35);
+    const x0 = this.genX + gap;
+    this.zones.push({ id: this.nextId++, x: x0, y: CEIL_Y, w: 540, h: FLOOR_Y - CEIL_Y, kind: 'lowg' });
+
+    this.addPlatform(x0 - 40, FLOOR_Y - 18, 220, 28, 'moving', 44, 1.9);
+    this.addPlatform(x0 + 180, CEIL_Y - 10, 240, 28, 'moving', 44, 1.9);
+    this.addPlatform(x0 + 360, FLOOR_Y - 12, 220, 28, 'boost');
+
+    this.pickups.push({
+      id: this.nextId++,
+      x: x0 + 270,
+      y: MID_Y,
+      kind: this.pickPower(),
+      taken: false,
+    });
+    this.lastSafeSide = 1;
+    this.genX = x0 + 560;
+  }
+
+  /** Set-piece 5: Salto de Portal (portal que cruza un abismo + láser inversor). */
+  private genPortalChasm(difficulty: number): void {
+    const gap = Math.round(105 + difficulty * 35);
+    const x0 = this.genX + gap;
+    const fromFloor = this.lastSafeSide === 1;
+
+    const entryY = fromFloor ? FLOOR_Y : CEIL_Y - 28;
+    const exitY = fromFloor ? CEIL_Y - 28 : FLOOR_Y;
+    this.addPlatform(x0 - 45, entryY, 240, 28, 'solid');
+    this.addPlatform(x0 + 260, exitY, 320, 28, 'solid');
+    // Plataforma alternativa opuesta por si alguien no entra al portal.
+    this.addPlatform(x0 + 80, exitY, 170, 26, 'solid');
+
+    this.portals.push({
+      id: this.nextId++,
+      x: x0 + 130,
+      y: fromFloor ? entryY - 52 : entryY + 80,
+      toX: x0 + 340,
+      toY: fromFloor ? exitY + 82 : exitY - 52,
+      r: 28,
+    });
+    if (this.rng() < 0.65) {
+      this.zones.push({ id: this.nextId++, x: x0 + 470, y: CEIL_Y - 10, w: 22, h: FLOOR_Y - CEIL_Y + 20, kind: 'flip' });
+    }
+    this.lastSafeSide = fromFloor ? -1 : 1;
+    this.genX = x0 + 560;
+  }
+
+  /** Set-piece 6: Puente frágil del Caos (se rompe bajo el puntero, obligando a los de atrás a invertir). */
+  private genFragileBridge(difficulty: number): void {
+    const gap = Math.round(105 + difficulty * 40);
+    const x0 = this.genX + gap;
+    const side: 1 | -1 = this.rng() < 0.5 ? 1 : -1;
+    const bridgeY = side === 1 ? FLOOR_Y : CEIL_Y - 28;
+    const escapeY = side === 1 ? CEIL_Y - 28 : FLOOR_Y;
+
+    for (let i = 0; i < 4; i++) {
+      this.addPlatform(x0 - 30 + i * 135, bridgeY, 128, 28, 'crumble');
+    }
+    // Pista de escape en el lado opuesto con huecos.
+    this.addPlatform(x0 + 90, escapeY, 180, 26, 'solid');
+    this.addPlatform(x0 + 350, escapeY, 200, 26, 'boost');
+
+    this.pickups.push({
+      id: this.nextId++,
+      x: x0 + 260,
+      y: MID_Y,
+      kind: this.pickPower(),
+      taken: false,
+    });
+    this.lastSafeSide = side === 1 ? -1 : 1;
+    this.genX = x0 + 540;
+  }
+
+  /** Set-piece 7: Bóveda de baja gravedad (gran salto flotante con poder en el aire). */
+  private genLowGVault(difficulty: number): void {
+    const gap = Math.round(115 + difficulty * 40);
+    const x0 = this.genX + gap;
+    this.zones.push({ id: this.nextId++, x: x0 - 20, y: CEIL_Y, w: 480, h: FLOOR_Y - CEIL_Y, kind: 'lowg' });
+    this.addPlatform(x0 - 45, FLOOR_Y, 200, 28, 'boost');
+    this.addPlatform(x0 + 140, CEIL_Y - 28, 220, 28, 'solid');
+    this.addPlatform(x0 + 320, FLOOR_Y, 220, 28, 'solid');
+    this.pickups.push({
+      id: this.nextId++,
+      x: x0 + 240,
+      y: MID_Y,
+      kind: this.pickPower(),
+      taken: false,
+    });
+    this.lastSafeSide = 1;
+    this.genX = x0 + 520;
   }
 
   /** Pide invertir la gravedad de un jugador. Si está en el aire, guarda buffer o usa doble salto. */
@@ -491,6 +584,7 @@ export class GravitySim {
           r.grounded = true;
           r.coyote = COYOTE_S;
           if (p.kind === 'crumble' && p.crumbleT < 0) p.crumbleT = 0;
+          if (p.kind === 'boost') r.turboT = Math.max(r.turboT, 0.95);
           if (!wasGrounded) this.events.push({ kind: 'land', id: r.id, x: r.x, y: p.y, dir: 1, color: r.color });
         }
       } else if (r.dir === -1 && r.vy <= 0) {
@@ -501,6 +595,7 @@ export class GravitySim {
           r.grounded = true;
           r.coyote = COYOTE_S;
           if (p.kind === 'crumble' && p.crumbleT < 0) p.crumbleT = 0;
+          if (p.kind === 'boost') r.turboT = Math.max(r.turboT, 0.95);
           if (!wasGrounded) this.events.push({ kind: 'land', id: r.id, x: r.x, y: bot, dir: -1, color: r.color });
         }
       }

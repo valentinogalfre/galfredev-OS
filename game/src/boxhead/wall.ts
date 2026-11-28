@@ -125,12 +125,17 @@ function spawnFloat(x: number, y: number, text: string, color: string): void {
 }
 
 function bakeFloor(): void {
-  // Piso gris cemento clásico de Boxhead con baldosas sutiles y sombras de muros.
-  floorCtx.fillStyle = '#3a3d42';
+  const arena = sim ? sim.arena : arenaId;
+  // Base de color según el mapa (0 costo por frame: se dibuja una sola vez).
+  floorCtx.fillStyle = arena === 'cementerio' ? '#2c332d'
+    : arena === 'estacion' ? '#33363c'
+    : arena === 'laberinto' ? '#36383e'
+    : '#3c3f45';
   floorCtx.fillRect(0, 0, WORLD_W, WORLD_H);
 
-  const tile = 64;
-  floorCtx.strokeStyle = 'rgba(0,0,0,0.16)';
+  // Grilla de baldosas.
+  const tile = arena === 'cementerio' ? 48 : 64;
+  floorCtx.strokeStyle = 'rgba(0,0,0,0.18)';
   floorCtx.lineWidth = 1;
   floorCtx.beginPath();
   for (let x = 0; x <= WORLD_W; x += tile) {
@@ -143,20 +148,89 @@ function bakeFloor(): void {
   }
   floorCtx.stroke();
 
-  // Puertas de spawn marcadas en el piso.
-  floorCtx.fillStyle = 'rgba(200, 40, 40, 0.22)';
-  floorCtx.fillRect(460, 0, 360, 18);
-  floorCtx.fillRect(460, WORLD_H - 18, 360, 18);
-  floorCtx.fillRect(0, 240, 18, 240);
-  floorCtx.fillRect(WORLD_W - 18, 240, 18, 240);
+  // Detalles ambientales únicos por mapa.
+  if (arena === 'plaza') {
+    // Medallón central de la plaza + sendas peatonales.
+    floorCtx.fillStyle = 'rgba(255,255,255,0.045)';
+    floorCtx.beginPath();
+    floorCtx.arc(WORLD_W * 0.5, WORLD_H * 0.5, 130, 0, Math.PI * 2);
+    floorCtx.fill();
+    floorCtx.strokeStyle = 'rgba(255, 212, 71, 0.22)';
+    floorCtx.lineWidth = 3;
+    floorCtx.beginPath();
+    floorCtx.arc(WORLD_W * 0.5, WORLD_H * 0.5, 118, 0, Math.PI * 2);
+    floorCtx.stroke();
+    floorCtx.fillStyle = 'rgba(255,255,255,0.07)';
+    for (let i = -2; i <= 2; i++) {
+      floorCtx.fillRect(600 + i * 22, 60, 12, 38);
+      floorCtx.fillRect(600 + i * 22, WORLD_H - 98, 12, 38);
+    }
+  } else if (arena === 'laberinto') {
+    // Sectores pintados en el piso del búnker.
+    floorCtx.fillStyle = 'rgba(255,255,255,0.07)';
+    floorCtx.font = '600 42px Sora, sans-serif';
+    floorCtx.textAlign = 'center';
+    floorCtx.textBaseline = 'middle';
+    floorCtx.fillText('A1', 160, 120);
+    floorCtx.fillText('B2', 1120, 120);
+    floorCtx.fillText('C3', 160, 600);
+    floorCtx.fillText('D4', 1120, 600);
+  } else if (arena === 'estacion') {
+    // Vías de tren dobles + durmientes + líneas amarillas de andén.
+    floorCtx.fillStyle = '#25272b';
+    floorCtx.fillRect(420, 0, 440, WORLD_H);
+    floorCtx.fillStyle = '#4a3d33';
+    for (let y = 16; y < WORLD_H; y += 26) {
+      floorCtx.fillRect(450, y, 120, 9);
+      floorCtx.fillRect(710, y, 120, 9);
+    }
+    floorCtx.fillStyle = '#757c85';
+    floorCtx.fillRect(470, 0, 8, WORLD_H);
+    floorCtx.fillRect(542, 0, 8, WORLD_H);
+    floorCtx.fillRect(730, 0, 8, WORLD_H);
+    floorCtx.fillRect(802, 0, 8, WORLD_H);
+    floorCtx.fillStyle = 'rgba(255, 208, 56, 0.55)';
+    floorCtx.fillRect(410, 0, 8, WORLD_H);
+    floorCtx.fillRect(862, 0, 8, WORLD_H);
+  } else if (arena === 'cementerio') {
+    // Caminos de tierra en cruz + halos cálidos de antorchas.
+    floorCtx.fillStyle = '#3b372c';
+    floorCtx.fillRect(WORLD_W * 0.5 - 48, 0, 96, WORLD_H);
+    floorCtx.fillRect(0, WORLD_H * 0.5 - 48, WORLD_W, 96);
+    const torches = [[296, 225], [984, 225], [296, 495], [984, 495]];
+    for (let i = 0; i < torches.length; i++) {
+      const [tx, ty] = torches[i];
+      const g = floorCtx.createRadialGradient(tx, ty, 6, tx, ty, 95);
+      g.addColorStop(0, 'rgba(255, 168, 56, 0.22)');
+      g.addColorStop(1, 'rgba(255, 168, 56, 0)');
+      floorCtx.fillStyle = g;
+      floorCtx.beginPath();
+      floorCtx.arc(tx, ty, 95, 0, Math.PI * 2);
+      floorCtx.fill();
+    }
+  }
+
+  // Puertas de spawn con franjas de peligro rojas/negras.
+  floorCtx.fillStyle = 'rgba(215, 40, 40, 0.28)';
+  floorCtx.fillRect(460, 0, 360, 22);
+  floorCtx.fillRect(460, WORLD_H - 22, 360, 22);
+  floorCtx.fillRect(0, 240, 22, 240);
+  floorCtx.fillRect(WORLD_W - 22, 240, 22, 240);
 
   if (!sim) return;
   // Sombras proyectadas de las paredes (fijas en el piso).
-  floorCtx.fillStyle = 'rgba(0,0,0,0.28)';
+  floorCtx.fillStyle = 'rgba(0,0,0,0.3)';
   for (let i = 0; i < sim.walls.length; i++) {
     const w = sim.walls[i];
     floorCtx.fillRect(w.x + 8, w.y + 10, w.w, w.h);
   }
+}
+
+function stampShell(x: number, y: number): void {
+  floorCtx.fillStyle = '#d4aa38';
+  floorCtx.globalAlpha = 0.72;
+  floorCtx.fillRect(x + (Math.random() - 0.5) * 14, y + (Math.random() - 0.5) * 14, 4, 2);
+  floorCtx.globalAlpha = 1;
 }
 
 function stampBlood(x: number, y: number, big: boolean, color: string): void {
@@ -466,22 +540,45 @@ function draw(dt: number): void {
     ctx.strokeRect(w.x, w.y, w.w, w.h);
   }
 
-  // 3. Cajas parpadeantes (munición / botiquín).
+  // 2.5 Baliza interactiva de Caja de Suministros dorada.
+  if (sim.supplyBeacon) {
+    const sb = sim.supplyBeacon;
+    const pulse = 18 + Math.sin(sim.time * 14) * 6;
+    ctx.strokeStyle = '#ffd447';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(sb.x, sb.y, pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 212, 71, 0.16)';
+    ctx.beginPath();
+    ctx.arc(sb.x, sb.y, 26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffd447';
+    ctx.font = '600 12px Sora, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`SUMINISTRO ${Math.ceil(sb.timer)}s`, sb.x, sb.y - 26);
+  }
+
+  // 3. Cajas parpadeantes (munición / botiquín / suministro dorado).
   const blink = Math.floor(sim.time * 6) % 2 === 0;
   for (let i = 0; i < sim.crates.length; i++) {
     const c = sim.crates[i];
     ctx.fillStyle = 'rgba(0,0,0,0.32)';
-    ctx.fillRect(c.x - 10, c.y + 4, 22, 10);
-    ctx.fillStyle = c.kind === 'med' ? (blink ? '#ffffff' : '#ff4466') : (blink ? '#ffd447' : '#c98a1a');
-    ctx.fillRect(c.x - 11, c.y - 11, 22, 22);
+    ctx.fillRect(c.x - 11, c.y + 5, 24, 10);
+    const sz = c.kind === 'supply' ? 26 : 22;
+    const half = sz * 0.5;
+    ctx.fillStyle = c.kind === 'supply' ? (blink ? '#fff2a6' : '#ffd447')
+      : c.kind === 'med' ? (blink ? '#ffffff' : '#ff4466')
+      : (blink ? '#ffd447' : '#c98a1a');
+    ctx.fillRect(c.x - half, c.y - half, sz, sz);
     ctx.strokeStyle = '#111';
     ctx.lineWidth = 2;
-    ctx.strokeRect(c.x - 11, c.y - 11, 22, 22);
+    ctx.strokeRect(c.x - half, c.y - half, sz, sz);
     ctx.fillStyle = c.kind === 'med' ? '#e63946' : '#111';
     ctx.font = '600 13px Sora, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(c.kind === 'med' ? '+' : 'A', c.x, c.y + 1);
+    ctx.fillText(c.kind === 'supply' ? '★' : c.kind === 'med' ? '+' : 'A', c.x, c.y + 1);
   }
 
   // 4. Props: barriles rojos, minas, muros falsos, torretas.
@@ -539,9 +636,24 @@ function draw(dt: number): void {
     drawPlayer(sim.players[i]);
   }
 
-  // 7. Proyectiles.
+  // 7. Proyectiles con estela para Railgun y cohetes.
   for (let i = 0; i < sim.projectiles.length; i++) {
     const b = sim.projectiles[i];
+    if (b.pierce) {
+      ctx.strokeStyle = '#4de8ff';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - b.vx * 0.04, b.y - b.vy * 0.04);
+      ctx.stroke();
+    } else if (b.blast > 0 && !b.grenade) {
+      ctx.strokeStyle = 'rgba(255, 160, 60, 0.55)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(b.x - b.vx * 0.03, b.y - b.vy * 0.03);
+      ctx.stroke();
+    }
     ctx.fillStyle = b.color;
     ctx.beginPath();
     ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
@@ -574,6 +686,23 @@ function draw(dt: number): void {
   }
   ctx.globalAlpha = 1;
   ctx.restore();
+
+  // Barra de jefe arriba si hay un jefe vivo.
+  const boss = sim.enemies.find((e) => e.kind === 'boss');
+  if (boss) {
+    const bw = 360;
+    const bx = (WORLD_W - bw) * 0.5;
+    ctx.fillStyle = 'rgba(14, 14, 18, 0.85)';
+    ctx.fillRect(bx - 6, 62, bw + 12, 22);
+    ctx.fillStyle = '#331115';
+    ctx.fillRect(bx, 68, bw, 10);
+    ctx.fillStyle = '#ff2a38';
+    ctx.fillRect(bx, 68, bw * Math.max(0, boss.hp / boss.maxHp), 10);
+    ctx.fillStyle = '#ffd447';
+    ctx.font = '600 11px Sora, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('JEFE DEMONIO', WORLD_W * 0.5, 58);
+  }
 
   // HUD superior.
   const mult = Math.min(25, 1 + Math.floor(sim.combo / 3));
@@ -612,6 +741,13 @@ function drawEnemy(en: Enemy): void {
   ctx.strokeStyle = '#111';
   ctx.lineWidth = 2;
   ctx.strokeRect(en.x - s * 0.78, en.y - s * 1.15, s * 1.56, s * 1.05);
+
+  // Cuernos para demonios y corona para jefes.
+  if (en.kind === 'demon' || en.kind === 'boss') {
+    ctx.fillStyle = en.kind === 'boss' ? '#ffd447' : '#2a0808';
+    ctx.fillRect(en.x - s * 0.65, en.y - s * 1.42, 5, s * 0.3);
+    ctx.fillRect(en.x + s * 0.65 - 5, en.y - s * 1.42, 5, s * 0.3);
+  }
 
   // Ojos mirando hacia el objetivo.
   const ex = en.aimX * s * 0.25;
@@ -684,6 +820,10 @@ function drawPlayer(p: Player): void {
   ctx.fillRect(p.x - 12, p.y - 20, 24, 18);
   ctx.strokeRect(p.x - 12, p.y - 20, 24, 18);
 
+  // Vincha / pelo del color del jugador para distinguir mejor entre 6.
+  ctx.fillStyle = col;
+  ctx.fillRect(p.x - 12, p.y - 20, 24, 5);
+
   // Ojos mirando hacia aimX/aimY.
   const ex = p.aimX * 4;
   const ey = p.aimY * 2;
@@ -691,12 +831,14 @@ function drawPlayer(p: Player): void {
   ctx.fillRect(p.x + ex - 5, p.y - 13 + ey, 3, 3);
   ctx.fillRect(p.x + ex + 2, p.y - 13 + ey, 3, 3);
 
-  // Cañón del arma.
-  ctx.strokeStyle = '#1c1c1c';
-  ctx.lineWidth = 5;
+  // Cañón diferenciado según el arma equipada.
+  const gunLen = p.weapon === 'railgun' ? 28 : p.weapon === 'rocket' ? 26 : p.weapon === 'shotgun' ? 24 : p.weapon === 'uzi' ? 18 : 17;
+  const gunW = p.weapon === 'rocket' ? 8 : p.weapon === 'railgun' ? 6 : 5;
+  ctx.strokeStyle = p.weapon === 'railgun' ? '#4de8ff' : p.weapon === 'rocket' ? '#3d6e3a' : '#1c1c1c';
+  ctx.lineWidth = gunW;
   ctx.beginPath();
   ctx.moveTo(p.x, p.y + 2);
-  ctx.lineTo(p.x + p.aimX * 20, p.y + 2 + p.aimY * 20);
+  ctx.lineTo(p.x + p.aimX * gunLen, p.y + 2 + p.aimY * gunLen);
   ctx.stroke();
 
   // Nombre corto + barrita de vida.
@@ -727,6 +869,12 @@ function loop(ts: number): void {
         const ev = sim.events[i];
         if (ev.kind === 'shot') {
           sound.shot(ev.weapon);
+          if (ev.weapon === 'pistol' || ev.weapon === 'uzi' || ev.weapon === 'shotgun') {
+            stampShell(ev.x, ev.y);
+            spawnSmoke(ev.x + ev.ax * 18, ev.y + ev.ay * 18, 2, 70, '#ffe066', 6);
+          } else if (ev.weapon === 'railgun') {
+            spawnSmoke(ev.x + ev.ax * 22, ev.y + ev.ay * 22, 4, 100, '#4de8ff', 7);
+          }
         } else if (ev.kind === 'blood') {
           stampBlood(ev.x, ev.y, ev.big, ev.color);
           if (ev.big) spawnSmoke(ev.x, ev.y, 6, 120, ev.color, 7);

@@ -1,6 +1,6 @@
 /** Mensajes y catálogos compartidos entre la pared y los celulares de Boxhead: Horda. */
 
-export type ArenaId = 'plaza' | 'laberinto' | 'estacion';
+export type ArenaId = 'plaza' | 'laberinto' | 'estacion' | 'cementerio';
 export type ModeId = 'coop' | 'duelo';
 export type Phase = 'lobby' | 'play' | 'perk' | 'over';
 export type WeaponId = 'pistol' | 'uzi' | 'shotgun' | 'barrel' | 'grenade' | 'rocket' | 'mine' | 'wall' | 'railgun';
@@ -9,9 +9,10 @@ export type PerkId = 'cadencia' | 'rebote' | 'boom' | 'torreta' | 'curar' | 'vel
 export const MAX_PLAYERS = 6;
 
 export const ARENAS: readonly { id: ArenaId; name: string; tag: string }[] = [
-  { id: 'plaza', name: 'La Plaza', tag: 'Abierta con columnas y barriles' },
-  { id: 'laberinto', name: 'El Laberinto', tag: 'Pasillos para atrincherarse' },
-  { id: 'estacion', name: 'La Estación', tag: 'Cuellos de botella y emboscadas' },
+  { id: 'plaza', name: 'La Plaza', tag: 'Patio abierto, columnas y barriles' },
+  { id: 'laberinto', name: 'El Laberinto', tag: 'Búnker con pasillos para atrincherarse' },
+  { id: 'estacion', name: 'La Estación', tag: 'Andén de tren, vías y emboscadas' },
+  { id: 'cementerio', name: 'El Cementerio', tag: 'Criptas, niebla y cruces cerrados' },
 ];
 
 export const MODES: readonly { id: ModeId; name: string }[] = [
