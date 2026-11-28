@@ -2,7 +2,7 @@ import './wall.css';
 import logoUrl from '../../../app/src/main/assets/remote/logo.svg';
 import { connect } from '../net/link';
 import { BALL, FIELDS, Match, PLAYER, TICK, type Disc, type Field } from './sim';
-import { GOALS, KITS, MINUTES, cleanAvatar, type Command, type FromRoom, type Phase, type Seat, type Shared, type Team, type Wish } from './protocol';
+import { GOALS, KITS, MINUTES, TEMPOS, cleanAvatar, type Command, type FromRoom, type Phase, type Seat, type Shared, type Team, type Wish } from './protocol';
 import { Whistle } from './sound';
 
 const hash = new URLSearchParams(location.hash.slice(1));
@@ -30,12 +30,15 @@ function qrSvg(code: string): string {
 interface Person extends Seat { joined: number; gone: number }
 const people = new Map<number, Person>();
 const inputs = new Map<number, { x: number; y: number; k: boolean }>();
-const room = { field: 1, minutes: 0, goals: 0, kits: [0, 1] as [number, number] };
+const room = { field: 1, minutes: 1, goals: 0, tempo: 0, kits: [0, 1] as [number, number] };
 let phase: Phase = 'lobby';
 let paused = false;
 let match: Match | null = null;
 let last: Shared['last'] = null;
 let scorers: { team: 0 | 1; name: string; own: boolean }[] = [];
+let saveCounts = new Map<string, number>();
+let kickCounts = new Map<string, number>();
+let lastClockTick = -1;
 let order = 0;
 
 const seated = () => Array.from(people.values()).sort((a, b) => a.joined - b.joined);
@@ -81,13 +84,17 @@ function onRoster(list: { id: number; name: string; on: boolean }[]): void {
 }
 
 function start(): void {
-  match = new Match(field(), MINUTES[room.minutes] * 60 * 60, GOALS[room.goals]);
+  const tempo = TEMPOS[room.tempo];
+  match = new Match(field(), MINUTES[room.minutes] * 60 * 60, GOALS[room.goals], tempo.speed, tempo.kick);
   for (const p of people.values()) place(p);
   match.reset();
   phase = 'play';
   paused = false;
   last = null;
   scorers = [];
+  saveCounts = new Map();
+  kickCounts = new Map();
+  lastClockTick = -1;
   drawField();
   sound.whistle();
   changed();
@@ -126,6 +133,7 @@ function onCommand(id: number, d: Command | Wish): void {
     case 'field': if (phase !== 'play') room.field = turn(room.field, step, FIELDS.length); drawField(); break;
     case 'time': if (phase !== 'play') room.minutes = turn(room.minutes, step, MINUTES.length); break;
     case 'goals': if (phase !== 'play') room.goals = turn(room.goals, step, GOALS.length); break;
+    case 'tempo': if (phase !== 'play') room.tempo = turn(room.tempo, step, TEMPOS.length); break;
     case 'kit': {
       const team = d.team === 1 ? 1 : 0, other = room.kits[1 - team];
       let next = turn(room.kits[team], step, KITS.length);
@@ -172,6 +180,7 @@ function shared(): Shared {
     field: field().name,
     minutes: MINUTES[room.minutes],
     goals: GOALS[room.goals],
+    tempo: TEMPOS[room.tempo].name,
     kits: [room.kits[0], room.kits[1]],
     players: seated().map(({ id, name, team, avatar, on }) => ({ id, name, team, avatar, on })),
     score: match ? [match.score[0], match.score[1]] : [0, 0],
@@ -215,14 +224,20 @@ logo.onload = () => drawField();
 logo.src = logoUrl;
 
 document.body.insertAdjacentHTML('beforeend', `
+  <div id="oro"></div>
+  <div id="flash"></div>
   <header id="marcador"></header>
   <section id="sala" class="lamina"></section>
-  <div id="gol"><b>¡GOL!</b><span></span></div>
+  <div id="gol"><b>¡GOOOOL!</b><span></span><em></em></div>
+  <div id="aviso"><b></b><span></span></div>
   <div id="pausa" class="lamina chica"><b>PAUSA</b><span>El que lidera la sala la saca desde el celular</span></div>
   <div id="fuera">Se cortó la sala. Volviendo a conectar…</div>`);
 const board = document.getElementById('marcador') as HTMLElement;
 const lobby = document.getElementById('sala') as HTMLElement;
 const goalBanner = document.getElementById('gol') as HTMLElement;
+const calloutBanner = document.getElementById('aviso') as HTMLElement;
+const flashEl = document.getElementById('flash') as HTMLElement;
+const oroEl = document.getElementById('oro') as HTMLElement;
 const pauseBanner = document.getElementById('pausa') as HTMLElement;
 const qrCode = qrSvg(hash.get('qr') ?? '');
 
@@ -345,27 +360,75 @@ const bits: Bit[] = [];
 const trail: { x: number; y: number }[] = [];
 let quake = 0;
 let goalTimer = 0;
+let calloutTimer = 0;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-function celebrate(team: 0 | 1, by: number | null, own: boolean): void {
+function flash(color: string): void {
+  flashEl.style.background = color;
+  flashEl.classList.remove('on');
+  void flashEl.offsetWidth;
+  flashEl.classList.add('on');
+}
+
+function showCallout(title: string, sub: string, kind: 'save' | 'post' | 'golden', duration = 1.6): void {
+  (calloutBanner.querySelector('b') as HTMLElement).textContent = title;
+  const sp = calloutBanner.querySelector('span') as HTMLElement;
+  sp.textContent = sub;
+  sp.style.display = sub ? 'inline-block' : 'none';
+  calloutBanner.className = kind;
+  void calloutBanner.offsetWidth;
+  calloutBanner.classList.add('on');
+  calloutTimer = duration;
+}
+
+function celebrate(team: 0 | 1, by: number | null, own: boolean, tied: boolean): void {
   const f = field(), x = team === 0 ? f.w : -f.w, kit = KITS[room.kits[team]];
   const who = by === null ? '' : people.get(by)?.name ?? '';
+  const isGoldenWin = !!match && match.overtime;
   last = { team, name: who, own };
   if (who) scorers.push({ team, name: who, own });
-  for (let i = 0; i < 70; i++) {
-    const a = Math.random() * Math.PI * 2, v = 2 + Math.random() * 5;
-    bits.push({ x, y: (Math.random() - 0.5) * f.goal, vx: Math.cos(a) * v - (team === 0 ? 2 : -2), vy: Math.sin(a) * v, t: 1, color: Math.random() < 0.7 ? hex(kit.color) : '#f1ede6', spin: Math.random() * 6 });
+  for (let i = 0; i < 95; i++) {
+    const a = Math.random() * Math.PI * 2, v = 2.2 + Math.random() * 6.2;
+    bits.push({ x, y: (Math.random() - 0.5) * f.goal, vx: Math.cos(a) * v - (team === 0 ? 2.4 : -2.4), vy: Math.sin(a) * v, t: 1.15, color: Math.random() < 0.65 ? hex(kit.color) : Math.random() < 0.5 ? '#e4a32b' : '#f1ede6', spin: Math.random() * 6 });
   }
-  quake = 1;
-  goalTimer = 2.2;
-  (goalBanner.querySelector('span') as HTMLElement).textContent = who ? (own ? `En contra de ${who}` : who) : KITS[room.kits[team]].name;
-  goalBanner.style.color = hex(kit.color);
+  rings.push({ x, y: 0, t: 1.3, color: hex(kit.color) });
+  quake = isGoldenWin ? 1.4 : 1.05;
+  goalTimer = 2.3;
+  (goalBanner.querySelector('b') as HTMLElement).textContent = isGoldenWin ? '¡GOL DE ORO!' : own ? '¡EN CONTRA!' : '¡GOOOOL!';
+  (goalBanner.querySelector('span') as HTMLElement).textContent = who ? (own ? `${who} · punto para ${KITS[room.kits[team]].name}` : who) : KITS[room.kits[team]].name;
+  const sub = goalBanner.querySelector('em') as HTMLElement;
+  if (tied && match) {
+    sub.textContent = `¡EMPATE ${match.score[0]} – ${match.score[1]}!`;
+    sub.style.display = 'inline-block';
+  } else if (isGoldenWin) {
+    sub.textContent = `GANÓ ${KITS[room.kits[team]].name.toUpperCase()}`;
+    sub.style.display = 'inline-block';
+  } else {
+    sub.textContent = '';
+    sub.style.display = 'none';
+  }
+  goalBanner.style.color = isGoldenWin ? '#e4a32b' : hex(kit.color);
   goalBanner.classList.remove('on');
   void goalBanner.offsetWidth;
   goalBanner.classList.add('on');
+  flash(isGoldenWin ? 'rgba(228,163,43,0.34)' : `${hex(kit.color)}44`);
   sound.goal();
   changed();
+}
+
+function celebrateEnd(): void {
+  const f = field();
+  const winnerKit = match && (match.winner === 0 || match.winner === 1) ? hex(KITS[room.kits[match.winner]].color) : '#e4a32b';
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 65; i++) {
+      const a = (side < 0 ? 0 : Math.PI) + (Math.random() - 0.5) * 1.4;
+      const v = 3 + Math.random() * 6.5;
+      bits.push({ x: side * f.w * 0.9, y: (Math.random() - 0.5) * f.h * 1.2, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 1.4, color: Math.random() < 0.6 ? winnerKit : Math.random() < 0.5 ? '#e4a32b' : '#f1ede6', spin: Math.random() * 6 });
+    }
+  }
+  flash('rgba(228,163,43,0.28)');
+  sound.victory();
 }
 
 function tick(): void {
@@ -377,16 +440,52 @@ function tick(): void {
     p.input.kick = !!input && input.k;
   }
   match.step();
+  if (match.state === 'play' && match.limitTicks > 0 && !match.overtime) {
+    const sec = match.clock;
+    if (sec <= 10 && sec > 0 && sec !== lastClockTick) {
+      lastClockTick = sec;
+      sound.tick(sec <= 3);
+    }
+  }
   for (const e of match.drain()) {
     if (e.type === 'kick') {
       const d = match.players.get(e.id)?.disc;
+      const p = people.get(e.id);
+      if (p) kickCounts.set(p.name, (kickCounts.get(p.name) ?? 0) + 1);
       if (d) rings.push({ x: d.x, y: d.y, t: 1, color: '#f1ede6' });
       sound.kick(e.power);
-    } else if (e.type === 'goal') celebrate(e.team, e.by, e.own);
+    } else if (e.type === 'post') {
+      rings.push({ x: e.x, y: e.y, t: 1, color: '#e4a32b' });
+      for (let i = 0; i < 16; i++) {
+        const a = Math.random() * Math.PI * 2, v = 1.5 + Math.random() * 3.5;
+        bits.push({ x: e.x, y: e.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0.7, color: i % 2 ? '#e4a32b' : '#f1ede6', spin: Math.random() * 6 });
+      }
+      quake = Math.max(quake, 0.35);
+      showCallout('¡PALO!', '', 'post', 1.15);
+      sound.post(e.power);
+    } else if (e.type === 'save') {
+      const who = people.get(e.id)?.name ?? '';
+      if (who) saveCounts.set(who, (saveCounts.get(who) ?? 0) + 1);
+      rings.push({ x: e.x, y: e.y, t: 1.2, color: '#6cc4f0' });
+      for (let i = 0; i < 24; i++) {
+        const a = Math.random() * Math.PI * 2, v = 1.6 + Math.random() * 4;
+        bits.push({ x: e.x, y: e.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0.85, color: i % 2 ? '#6cc4f0' : '#f1ede6', spin: Math.random() * 6 });
+      }
+      quake = Math.max(quake, 0.45);
+      flash('rgba(108,196,240,0.2)');
+      showCallout('¡ATAJADA!', who ? `Gran tapada de ${who}` : 'Salvada en la línea', 'save', 1.65);
+      sound.save();
+    } else if (e.type === 'golden') {
+      quake = 0.8;
+      flash('rgba(228,163,43,0.34)');
+      showCallout('EMPATE · ¡GOL DE ORO!', 'El próximo gol gana el partido', 'golden', 2.8);
+      sound.golden();
+      changed();
+    } else if (e.type === 'goal') celebrate(e.team, e.by, e.own, e.tied);
     else if (e.type === 'kickoff') changed();
     else if (e.type === 'end') {
       phase = 'over';
-      sound.whistle(3);
+      celebrateEnd();
       changed();
     }
   }
@@ -420,11 +519,13 @@ function render(a: number, dt: number): void {
     const r = rings[i];
     r.t -= dt * 3;
     if (r.t <= 0) { rings.splice(i, 1); continue; }
-    ctx.strokeStyle = `rgba(241,237,230,${r.t * 0.8})`;
-    ctx.lineWidth = 3 * r.t;
+    ctx.globalAlpha = Math.min(1, r.t * 0.85);
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = 3.2 * Math.min(1, r.t);
     ctx.beginPath();
-    ctx.arc(r.x, r.y, PLAYER.r + PLAYER.reach + (1 - r.t) * 22, 0, Math.PI * 2);
+    ctx.arc(r.x, r.y, PLAYER.r + PLAYER.reach + (1 - Math.min(1, r.t)) * 28, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.globalAlpha = 1;
   }
   if (match) {
     const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
@@ -499,6 +600,10 @@ function render(a: number, dt: number): void {
     goalTimer -= dt;
     if (goalTimer <= 0) goalBanner.classList.remove('on');
   }
+  if (calloutTimer > 0) {
+    calloutTimer -= dt;
+    if (calloutTimer <= 0) calloutBanner.classList.remove('on');
+  }
 }
 
 // ---- Láminas: marcador y sala ----
@@ -506,17 +611,19 @@ function render(a: number, dt: number): void {
 let boardText = '';
 function paintBoard(d: Shared): void {
   const k0 = KITS[d.kits[0]], k1 = KITS[d.kits[1]];
-  const time = d.phase === 'lobby' ? 'SALA' : d.overtime ? 'GOL DE ORO' : d.minutes === 0 ? clock(d.clock) : clock(d.clock);
+  const urgent = d.phase === 'play' && !d.overtime && d.minutes > 0 && d.clock <= 10 && d.clock > 0;
+  const time = d.phase === 'lobby' ? 'SALA' : d.overtime ? 'GOL DE ORO' : clock(d.clock);
   const html = `
     <img class="logo" src="${logoUrl}" alt="">
     <div class="equipo"><i style="background:${hex(k0.color)}"></i>${esc(k0.name)}</div>
     <div class="goles">${d.score[0]}<span>–</span>${d.score[1]}</div>
     <div class="equipo der">${esc(k1.name)}<i style="background:${hex(k1.color)}"></i></div>
-    <div class="reloj${d.overtime ? ' oro' : ''}">${time}</div>`;
+    <div class="reloj${d.overtime ? ' oro' : urgent ? ' urgente' : ''}">${time}</div>`;
   if (html !== boardText) {
     boardText = html;
     board.innerHTML = html;
   }
+  oroEl.classList.toggle('on', d.phase === 'play' && d.overtime);
   pauseBanner.classList.toggle('on', d.paused);
   lobby.classList.toggle('on', d.phase !== 'play');
   lobby.innerHTML = d.phase === 'over' ? overHtml(d) : lobbyHtml(d);
@@ -532,7 +639,7 @@ function column(d: Shared, team: Team): string {
 }
 
 function rules(d: Shared): string {
-  return `CANCHA ${d.field.toUpperCase()} · ${d.minutes ? `${d.minutes} MIN` : 'SIN RELOJ'} · ${d.goals ? `A ${d.goals} GOLES` : 'SIN LÍMITE DE GOLES'}`;
+  return `CANCHA ${d.field.toUpperCase()} · ${d.minutes ? `${d.minutes} MIN` : 'SIN RELOJ'} · ${d.goals ? `A ${d.goals} GOLES` : 'SIN LÍMITE'} · RITMO ${d.tempo.toUpperCase()}`;
 }
 
 function lobbyHtml(d: Shared): string {
@@ -554,18 +661,26 @@ function lobbyHtml(d: Shared): string {
 }
 
 function overHtml(d: Shared): string {
-  const title = d.winner === 0 || d.winner === 1 ? `Ganó ${esc(KITS[d.kits[d.winner]].name)}` : 'Empate';
-  const color = d.winner === 0 || d.winner === 1 ? hex(KITS[d.kits[d.winner]].color) : '#f1ede6';
+  const title = d.winner === 0 || d.winner === 1 ? `Campeón · ${esc(KITS[d.kits[d.winner]].name)}` : 'Empate final';
+  const color = d.winner === 0 || d.winner === 1 ? hex(KITS[d.kits[d.winner]].color) : '#e4a32b';
   const count = new Map<string, number>();
   for (const s of scorers) if (!s.own) count.set(s.name, (count.get(s.name) ?? 0) + 1);
   const list = Array.from(count.entries()).sort((a, b) => b[1] - a[1]).map(([n, g]) => `<li><b>${g}</b>${esc(n)}</li>`).join('');
+  const topSave = Array.from(saveCounts.entries()).sort((a, b) => b[1] - a[1])[0];
+  const totalKicks = Array.from(kickCounts.values()).reduce((sum, n) => sum + n, 0);
+  const totalSaves = Array.from(saveCounts.values()).reduce((sum, n) => sum + n, 0);
   const leader = d.players.find((p) => p.id === d.lead);
   return `
     <div class="final">
-      <span class="tag">FINAL · ${rules(d)}</span>
+      <span class="tag">${d.overtime ? 'FINAL POR GOL DE ORO' : 'FINAL DEL PARTIDO'} · ${rules(d)}</span>
       <h1 style="color:${color}">${title}</h1>
       <div class="resultado">${d.score[0]} – ${d.score[1]}</div>
       ${list ? `<span class="tag">GOLEADORES</span><ul class="goleadores">${list}</ul>` : ''}
+      <div class="stats">
+        ${topSave ? `<span><em>GUANTE DE ORO</em><b>${esc(topSave[0])} (${topSave[1]})</b></span>` : ''}
+        <span><em>REMATES</em><b>${totalKicks}</b></span>
+        ${totalSaves ? `<span><em>ATAJADAS</em><b>${totalSaves}</b></span>` : ''}
+      </div>
       <div class="cinta">${leader ? `${esc(leader.name)} elige la revancha o volver a la sala` : 'OK para la revancha'}</div>
     </div>`;
 }

@@ -34,7 +34,7 @@ describe('el partido', () => {
     run(match, 30);
     assert.deepEqual(match.score, [1, 0]);
     const goal = match.drain().find((e) => e.type === 'goal');
-    assert.deepEqual(goal, { type: 'goal', team: 0, by: 1, own: false });
+    assert.deepEqual(goal, { type: 'goal', team: 0, by: 1, own: false, tied: false });
     assert.equal(match.state, 'goal');
     // La red la frena: no se va de la cancha.
     assert.ok(match.ball.x <= field.w + field.depth);
@@ -82,6 +82,7 @@ describe('el partido', () => {
     run(match, 61);
     assert.equal(match.overtime, true);
     assert.equal(match.clock, 0);
+    assert.ok(match.drain().some((e) => e.type === 'golden'));
     shoot(match, true, 1);
     run(match, 200);
     assert.equal(match.state, 'over');
@@ -109,6 +110,32 @@ describe('el partido', () => {
     match.add(1, 1);
     assert.ok(p.disc.x > 0);
     assert.equal(match.players.size, 1);
+  });
+
+  it('detecta atajada en la línea, rebote en el palo y gol que empata', () => {
+    const match = new Match(field);
+    match.add(1, 0);
+    const keeper = match.add(2, 1);
+    match.state = 'play';
+    match.lastTouch = 1;
+    Object.assign(keeper.disc, { x: field.w - 22, y: 0, vx: 0, vy: 0 });
+    Object.assign(match.ball, { x: field.w - 52, y: 0, vx: 8, vy: 0 });
+    run(match, 6);
+    assert.ok(match.drain().some((e) => e.type === 'save' && e.id === 2));
+
+    const postMatch = new Match(field);
+    postMatch.state = 'play';
+    Object.assign(postMatch.ball, { x: field.w - 30, y: field.goal, vx: 8, vy: 0 });
+    run(postMatch, 6);
+    assert.ok(postMatch.drain().some((e) => e.type === 'post'));
+
+    const tieMatch = new Match(field);
+    tieMatch.score = [1, 0];
+    tieMatch.add(2, 1);
+    shoot(tieMatch, false, 2);
+    run(tieMatch, 30);
+    const goal = tieMatch.drain().find((e) => e.type === 'goal') as { tied: boolean } | undefined;
+    assert.equal(goal?.tied, true);
   });
 
   it('lo escrito sobre el jugador son dos caracteres en mayúscula', () => {

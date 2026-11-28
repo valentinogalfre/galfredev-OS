@@ -43,7 +43,10 @@ export interface Player {
 
 export type Event =
   | { type: 'kick'; id: number; power: number }
-  | { type: 'goal'; team: 0 | 1; by: number | null; own: boolean }
+  | { type: 'post'; x: number; y: number; power: number }
+  | { type: 'save'; id: number; x: number; y: number; team: 0 | 1 }
+  | { type: 'goal'; team: 0 | 1; by: number | null; own: boolean; tied: boolean }
+  | { type: 'golden' }
   | { type: 'kickoff' }
   | { type: 'end' };
 
@@ -72,15 +75,21 @@ export class Match {
   events: Event[] = [];
   private wait = 0;
   private ending = false;
+  private saveCd = 0;
+  private postCd = 0;
 
   readonly field: Field;
   readonly limitTicks: number;
   readonly goalsToWin: number;
+  readonly speedScale: number;
+  readonly kickScale: number;
 
-  constructor(field: Field, limitTicks = 0, goalsToWin = 0) {
+  constructor(field: Field, limitTicks = 0, goalsToWin = 0, speedScale = 1, kickScale = 1) {
     this.field = field;
     this.limitTicks = limitTicks;
     this.goalsToWin = goalsToWin;
+    this.speedScale = speedScale;
+    this.kickScale = kickScale;
     this.ball = disc(0, 0, BALL.r, BALL.inv, BALL.damp, BALL.bounce);
     this.posts = [-1, 1].reduce<Disc[]>((all, sx) => all.concat([-1, 1].map((sy) => disc(sx * field.w, sy * field.goal, POST.r, 0, 1, POST.bounce))), []);
   }
@@ -127,14 +136,26 @@ export class Match {
     }
     this.ball.vx *= BALL.damp;
     this.ball.vy *= BALL.damp;
+    if (this.saveCd > 0) this.saveCd--;
+    if (this.postCd > 0) this.postCd--;
     const list = [...this.players.values()];
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) collide(list[i].disc, list[j].disc);
-      if (collide(list[i].disc, this.ball)) this.touch(list[i].id);
+      const bvxBefore = this.ball.vx, bvyBefore = this.ball.vy;
+      if (collide(list[i].disc, this.ball)) {
+        this.checkSave(list[i], bvxBefore, bvyBefore);
+        this.touch(list[i].id);
+      }
       for (const post of this.posts) collide(list[i].disc, post);
       this.keepPlayer(list[i]);
     }
-    for (const post of this.posts) collide(this.ball, post);
+    for (const post of this.posts) {
+      const sp = Math.hypot(this.ball.vx, this.ball.vy);
+      if (collide(this.ball, post) && sp > 1.8 && this.postCd === 0) {
+        this.postCd = 16;
+        this.events.push({ type: 'post', x: post.x, y: post.y, power: Math.min(1, sp / 8) });
+      }
+    }
     this.keepBall();
     this.referee();
   }
@@ -151,7 +172,7 @@ export class Match {
     let x = input.x, y = input.y;
     const length = Math.hypot(x, y);
     if (length > 1) { x /= length; y /= length; }
-    const accel = input.kick ? PLAYER.kickAccel : PLAYER.accel;
+    const accel = (input.kick ? PLAYER.kickAccel : PLAYER.accel) * this.speedScale;
     d.vx += x * accel;
     d.vy += y * accel;
     if (!input.kick) {
@@ -162,10 +183,29 @@ export class Match {
     const dx = this.ball.x - d.x, dy = this.ball.y - d.y, gap = Math.hypot(dx, dy);
     if (gap - d.r - this.ball.r > PLAYER.reach || gap === 0) return;
     player.armed = false;
-    this.ball.vx += (dx / gap) * PLAYER.kick * this.ball.inv;
-    this.ball.vy += (dy / gap) * PLAYER.kick * this.ball.inv;
+    const bvxBefore = this.ball.vx, bvyBefore = this.ball.vy;
+    this.ball.vx += (dx / gap) * PLAYER.kick * this.kickScale * this.ball.inv;
+    this.ball.vy += (dy / gap) * PLAYER.kick * this.kickScale * this.ball.inv;
+    this.checkSave(player, bvxBefore, bvyBefore);
     this.touch(player.id);
     this.events.push({ type: 'kick', id: player.id, power: Math.min(1, Math.hypot(this.ball.vx, this.ball.vy) / 10) });
+  }
+
+  /** Detecta una atajada: la pelota iba fuerte hacia el arco propio y un jugador de ese equipo la desvía o frena. */
+  private checkSave(player: Player, bvxBefore: number, bvyBefore: number): void {
+    if (this.state !== 'play' || this.saveCd > 0) return;
+    const goalDir = player.team === 0 ? -1 : 1;
+    const towardOwnGoal = bvxBefore * goalDir;
+    const speedBefore = Math.hypot(bvxBefore, bvyBefore);
+    if (speedBefore < 3.8 || towardOwnGoal < 2.6) return;
+    const nearOwnGoal = this.ball.x * goalDir > this.field.w * 0.58 && Math.abs(this.ball.y) < this.field.goal * 1.45;
+    if (!nearOwnGoal) return;
+    const lastPlayer = this.lastTouch !== null ? this.players.get(this.lastTouch) : null;
+    if (lastPlayer && lastPlayer.team === player.team) return;
+    if (this.ball.vx * goalDir < towardOwnGoal * 0.55) {
+      this.saveCd = 45;
+      this.events.push({ type: 'save', id: player.id, x: this.ball.x, y: this.ball.y, team: player.team });
+    }
   }
 
   private touch(id: number): void {
@@ -231,7 +271,8 @@ export class Match {
       const by = this.lastTouch;
       const own = by !== null && this.players.get(by)?.team !== team;
       this.score[team]++;
-      this.events.push({ type: 'goal', team, by, own });
+      const tied = this.score[0] === this.score[1];
+      this.events.push({ type: 'goal', team, by, own, tied });
       this.kickoff = team === 0 ? 1 : 0;
       this.state = 'goal';
       this.wait = CELEBRATE;
@@ -245,7 +286,10 @@ export class Match {
         this.state = 'over';
         this.winner = this.score[0] > this.score[1] ? 0 : 1;
         this.events.push({ type: 'end' });
-      } else this.overtime = true;
+      } else {
+        this.overtime = true;
+        this.events.push({ type: 'golden' });
+      }
     }
   }
 

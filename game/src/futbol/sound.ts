@@ -44,6 +44,35 @@ export class Whistle {
     this.whistle(1);
   }
 
+  /** Rebote metálico en el palo o travesaño. */
+  post(power = 0.8): void {
+    this.tone(820, 0.24, 0.22 * power + 0.08, 'triangle', 760);
+    this.tone(1240, 0.18, 0.14 * power + 0.05, 'sine', 1180);
+  }
+
+  /** Atajada: golpe firme + acento ascendente. */
+  save(): void {
+    this.tone(330, 0.14, 0.2, 'triangle', 520);
+    this.tone(660, 0.22, 0.18, 'sine', 880, 0.06);
+  }
+
+  /** Empate y arranque del Gol de Oro. */
+  golden(): void {
+    [440, 554, 659, 880].forEach((f, i) => this.tone(f, 0.42, 0.18, 'sawtooth', f * 1.02, i * 0.08));
+    this.whistle(2);
+  }
+
+  /** Cuenta regresiva de los últimos 10 segundos. */
+  tick(urgent = false): void {
+    this.tone(urgent ? 980 : 680, 0.07, urgent ? 0.15 : 0.09, 'sine', urgent ? 960 : 660);
+  }
+
+  /** Fanfarria al terminar el partido. */
+  victory(): void {
+    this.whistle(3);
+    [523, 659, 784, 1046, 1318].forEach((f, i) => this.tone(f, 0.55, 0.16, 'triangle', f, 0.45 + i * 0.08));
+  }
+
   private tone(freq: number, length: number, level: number, type: OscillatorType, to: number, delay = 0): void {
     if (!this.ctx || !this.out) return;
     void this.ctx.resume?.();

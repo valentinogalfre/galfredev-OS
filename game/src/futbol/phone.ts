@@ -30,6 +30,41 @@ let problem = '';
 /** La palanca: de -1 a 1 en cada eje, y el botón de patear. */
 const stick = { x: 0, y: 0 };
 let kick = false;
+let prefsOpen = false;
+
+interface PadPrefs {
+  mode: 'fixed' | 'touch';
+  stickSize: 's' | 'm' | 'l';
+  kickSize: 's' | 'm' | 'l';
+  curve: 'soft' | 'normal' | 'sharp';
+  hand: 'right' | 'left';
+  vibe: boolean;
+}
+
+const DEFAULT_PREFS: PadPrefs = { mode: 'fixed', stickSize: 'm', kickSize: 'm', curve: 'normal', hand: 'right', vibe: true };
+function loadPrefs(): PadPrefs {
+  try {
+    const raw = store('prefs');
+    return raw ? { ...DEFAULT_PREFS, ...JSON.parse(raw) } : { ...DEFAULT_PREFS };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+const prefs: PadPrefs = loadPrefs();
+function savePrefs(): void {
+  store('prefs', JSON.stringify(prefs));
+  applyPrefsToPad();
+}
+function buzz(pattern: number | number[]): void {
+  if (prefs.vibe) navigator.vibrate?.(pattern);
+}
+
+const STICK_PX: Record<PadPrefs['stickSize'], { ring: number; knob: number; reach: number }> = {
+  s: { ring: 118, knob: 48, reach: 46 },
+  m: { ring: 146, knob: 58, reach: 58 },
+  l: { ring: 174, knob: 68, reach: 70 },
+};
+const KICK_PX: Record<PadPrefs['kickSize'], number> = { s: 112, m: 140, l: 168 };
 
 const head = () => `<header><img src="${logoUrl}" alt="galfredev"><span class="tag ${online ? 'up' : ''}"><i></i>${online ? 'Conectado' : 'Sin conexión'}</span></header>`;
 const command = (c: Command | Wish) => link?.send({ t: 'cmd', d: c });
@@ -63,8 +98,9 @@ function onMessage(message: FromRoom): void {
     // Un gol se siente en la mano: largo si es a favor, corto si es en contra.
     if (before && me && message.d.last && (before.score[0] !== message.d.score[0] || before.score[1] !== message.d.score[1])) {
       const mine = message.d.players.find((p) => p.id === me!.id);
-      navigator.vibrate?.(mine && mine.team === message.d.last.team ? [80, 60, 160] : 60);
+      buzz(mine && mine.team === message.d.last.team ? [80, 60, 160] : 60);
     }
+    if (before && !before.overtime && message.d.overtime) buzz([90, 50, 90, 50, 180]);
     if (before && document.body.classList.contains('playing') && before.phase === message.d.phase && before.paused === message.d.paused && team() !== 2) return paintPad();
   } else if (message.t === 'host' && !message.on) {
     shared = null;
@@ -114,6 +150,31 @@ function turn(flat: boolean): void {
   } catch { /* sin permiso para girar */ }
 }
 
+function prefsHtml(): string {
+  const seg = <K extends keyof PadPrefs>(key: K, items: [PadPrefs[K], string][]) =>
+    `<div class="segs">${items.map(([v, label]) => `<button type="button" class="seg ${prefs[key] === v ? 'on' : ''}" data-pk="${key}" data-pv="${String(v)}">${label}</button>`).join('')}</div>`;
+  return `<div class="prefs-grid">
+    <div class="pref"><span class="tag">Palanca</span>${seg('mode', [['fixed', 'Fija'], ['touch', 'Al toque']])}</div>
+    <div class="pref"><span class="tag">Sensibilidad</span>${seg('curve', [['soft', 'Suave'], ['normal', 'Normal'], ['sharp', 'Precisa']])}</div>
+    <div class="pref"><span class="tag">Tamaño palanca</span>${seg('stickSize', [['s', 'Chica'], ['m', 'Media'], ['l', 'Grande']])}</div>
+    <div class="pref"><span class="tag">Botón patear</span>${seg('kickSize', [['s', 'Chico'], ['m', 'Medio'], ['l', 'Grande']])}</div>
+    <div class="pref"><span class="tag">Lado</span>${seg('hand', [['right', 'Diestro'], ['left', 'Zurdo']])}</div>
+    <div class="pref"><span class="tag">Vibración</span>${seg('vibe', [[true, 'Sí'], [false, 'No']])}</div>
+  </div>`;
+}
+
+function wirePrefs(root: HTMLElement, onChange?: () => void): void {
+  root.querySelectorAll<HTMLElement>('[data-pk]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.pk as keyof PadPrefs;
+      const raw = btn.dataset.pv ?? '';
+      (prefs as unknown as Record<string, unknown>)[key] = key === 'vibe' ? raw === 'true' : raw;
+      savePrefs();
+      onChange?.();
+    });
+  });
+}
+
 function pick(label: string, value: string, action: string): string {
   return `<div class="pick"><button class="quiet" data-a="${action}" data-d="-1">‹</button><div><span class="tag">${label}</span><b>${esc(value)}</b></div><button class="quiet" data-a="${action}" data-d="1">›</button></div>`;
 }
@@ -145,6 +206,7 @@ function lobby(state: Shared): void {
       ${pick('Cancha', state.field, 'field')}
       ${pick('Tiempo', state.minutes ? `${state.minutes} min` : 'Sin reloj', 'time')}
       ${pick('Goles', state.goals ? `A ${state.goals}` : 'Sin límite', 'goals')}
+      ${pick('Ritmo', state.tempo || 'Normal', 'tempo')}
       <div class="row">${pick('Izquierda', KITS[state.kits[0]].name, 'kit0')}</div>
       <div class="row">${pick('Derecha', KITS[state.kits[1]].name, 'kit1')}</div>
       <div class="row"><button class="quiet" data-c="shuffle">Mezclar equipos</button><button class="quiet" data-c="exit">Salir del juego</button></div>` : '';
@@ -161,11 +223,18 @@ function lobby(state: Shared): void {
         <label><span class="tag">Letras</span><input id="avatar" maxlength="4" autocomplete="off" value="${esc(self?.avatar ?? '')}"></label>
       </div>
       <div class="sides">${teams}</div>
+      <details class="controls-box" ${prefsOpen ? 'open' : ''}>
+        <summary><span class="tag">Mis controles</span><em>${prefs.mode === 'fixed' ? 'Fija' : 'Al toque'} · ${prefs.hand === 'left' ? 'Zurdo' : 'Diestro'}</em></summary>
+        ${prefsHtml()}
+      </details>
       ${settings}
       <h2 class="tag title">En la cancha · ${state.players.filter((q) => q.on).length}</h2>
       <ol>${rows}</ol>
     </div>
     <div class="foot stack">${foot}</div>`;
+  const box = app.querySelector('.controls-box') as HTMLDetailsElement | null;
+  box?.addEventListener('toggle', () => { prefsOpen = box.open; });
+  wirePrefs(app, () => render());
   app.querySelectorAll<HTMLElement>('[data-team]').forEach((b) => b.addEventListener('click', () => command({ a: 'team', team: Number(b.dataset.team) as Team })));
   app.querySelectorAll<HTMLElement>('[data-c]').forEach((b) => b.addEventListener('click', () => command({ a: b.dataset.c } as Command)));
   app.querySelectorAll<HTMLElement>('[data-a]').forEach((b) => b.addEventListener('click', () => {
@@ -185,54 +254,87 @@ function lobby(state: Shared): void {
   });
 }
 
+function applyPrefsToPad(): void {
+  const s = STICK_PX[prefs.stickSize];
+  pitch.style.setProperty('--ring', `${s.ring}px`);
+  pitch.style.setProperty('--knob', `${s.knob}px`);
+  pitch.style.setProperty('--kick', `${KICK_PX[prefs.kickSize]}px`);
+  pitch.classList.toggle('lefty', prefs.hand === 'left');
+  const hint = pitch.querySelector('.zone .hint');
+  if (hint) hint.textContent = prefs.mode === 'fixed' ? 'Palanca fija con límite' : 'Tocá para mover (anclada)';
+}
+
+function shapeStick(dx: number, dy: number, reach: number): { x: number; y: number; vx: number; vy: number } {
+  const far = Math.hypot(dx, dy);
+  if (far === 0) return { x: 0, y: 0, vx: 0, vy: 0 };
+  const clamped = Math.min(far, reach);
+  const nx = dx / far, ny = dy / far;
+  const dead = prefs.curve === 'sharp' ? 0.06 : prefs.curve === 'soft' ? 0.12 : 0.09;
+  const raw = clamped / reach;
+  let mag = raw <= dead ? 0 : (raw - dead) / (1 - dead);
+  if (prefs.curve === 'soft') mag = mag * mag;
+  else if (prefs.curve === 'normal') mag = Math.pow(mag, 1.25);
+  return { x: nx * mag, y: ny * mag, vx: nx * clamped, vy: ny * clamped };
+}
+
 /**
- * El control: a la izquierda un trackpad que nace donde se apoya el dedo, a la derecha el botón de patear.
- * Arriba, chico, el marcador; el partido se mira en la pared.
+ * El control: palanca con límite firme (fija o anclada al toque, nunca se escapa de la pantalla),
+ * botón de patear personalizable y panel rápido de ajustes en vivo.
  */
 function buildPad(): void {
   if (pitch.querySelector('.zone')) return paintPad();
   pitch.innerHTML = `
-    <div class="zone"><div class="ring"><i></i></div><span class="hint tag">Arrastrá para moverte</span></div>
+    <div class="zone"><div class="ring"><i></i></div><span class="hint tag">Palanca fija con límite</span></div>
     <div class="top"><span class="board"></span><span class="tag clock"></span></div>
     <button class="kick"><b>Patear</b></button>
+    <button class="quiet gear" title="Controles">⚙</button>
     <button class="quiet pause">II</button>
+    <div class="sheet"><div class="sheet-card"><div class="sheet-head"><span class="tag">Personalizar controles</span><button class="quiet close-sheet">Listo</button></div><div class="sheet-body"></div></div></div>
     <div class="paused"><b>Pausa</b><div class="row"><button class="go cinta" data-c="pause">Seguir</button><button class="quiet" data-c="stop">Terminar</button></div></div>`;
   const zone = pitch.querySelector('.zone') as HTMLElement, ring = pitch.querySelector('.ring') as HTMLElement, knob = ring.querySelector('i') as HTMLElement;
-  const reach = 56;
   let finger = -1, ox = 0, oy = 0;
   // Girada a mano (celular parado sin poder acostar la pantalla), los ejes del dedo también giran.
   const axes = (e: PointerEvent) => {
     const tall = window.innerHeight > window.innerWidth, box = zone.getBoundingClientRect();
-    return tall ? { x: e.clientY - box.top, y: box.right - e.clientX } : { x: e.clientX - box.left, y: e.clientY - box.top };
+    return tall
+      ? { x: e.clientY - box.top, y: box.right - e.clientX, w: box.height, h: box.width }
+      : { x: e.clientX - box.left, y: e.clientY - box.top, w: box.width, h: box.height };
+  };
+  const ringCenter = () => {
+    const tall = window.innerHeight > window.innerWidth, zb = zone.getBoundingClientRect(), rb = ring.getBoundingClientRect();
+    const rcx = rb.left + rb.width / 2, rcy = rb.top + rb.height / 2;
+    return tall ? { x: rcy - zb.top, y: zb.right - rcx } : { x: rcx - zb.left, y: rcy - zb.top };
+  };
+  const updateFrom = (ax: number, ay: number) => {
+    const reach = STICK_PX[prefs.stickSize].reach;
+    const out = shapeStick(ax - ox, ay - oy, reach);
+    stick.x = out.x;
+    stick.y = out.y;
+    knob.style.transform = `translate(${out.vx}px, ${out.vy}px)`;
   };
   zone.addEventListener('pointerdown', (e) => {
     if (finger !== -1) return;
     finger = e.pointerId;
     zone.setPointerCapture?.(e.pointerId);
     const at = axes(e);
-    ox = at.x;
-    oy = at.y;
-    ring.style.left = `${ox}px`;
-    ring.style.top = `${oy}px`;
+    const half = STICK_PX[prefs.stickSize].ring / 2 + 12;
+    if (prefs.mode === 'fixed') {
+      const c = ringCenter();
+      ox = c.x;
+      oy = c.y;
+    } else {
+      ox = Math.max(half, Math.min(at.w - half, at.x));
+      oy = Math.max(half, Math.min(at.h - half, at.y));
+      ring.style.left = `${ox}px`;
+      ring.style.top = `${oy}px`;
+    }
     ring.classList.add('held');
+    updateFrom(at.x, at.y);
   });
   zone.addEventListener('pointermove', (e) => {
     if (e.pointerId !== finger) return;
     const at = axes(e);
-    let dx = at.x - ox, dy = at.y - oy;
-    const far = Math.hypot(dx, dy);
-    // Si el dedo se va lejos, el aro lo sigue: no hace falta volver al centro para cambiar de dirección.
-    if (far > reach) {
-      ox += (dx / far) * (far - reach);
-      oy += (dy / far) * (far - reach);
-      ring.style.left = `${ox}px`;
-      ring.style.top = `${oy}px`;
-      dx = at.x - ox;
-      dy = at.y - oy;
-    }
-    stick.x = Math.max(-1, Math.min(1, dx / reach));
-    stick.y = Math.max(-1, Math.min(1, dy / reach));
-    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    updateFrom(at.x, at.y);
   });
   for (const type of ['pointerup', 'pointercancel']) zone.addEventListener(type, (e) => {
     if ((e as PointerEvent).pointerId !== finger) return;
@@ -245,15 +347,27 @@ function buildPad(): void {
   const button = pitch.querySelector('.kick') as HTMLElement;
   const press = (down: boolean) => (e: Event) => {
     e.preventDefault();
-    if (down && !kick) navigator.vibrate?.(18);
+    if (down && !kick) buzz(18);
     kick = down;
     button.classList.toggle('held', down);
     send();
   };
   button.addEventListener('pointerdown', press(true));
   for (const type of ['pointerup', 'pointercancel', 'pointerleave']) button.addEventListener(type, press(false));
+  const sheet = pitch.querySelector('.sheet') as HTMLElement;
+  const sheetBody = pitch.querySelector('.sheet-body') as HTMLElement;
+  const paintSheet = () => {
+    sheetBody.innerHTML = prefsHtml();
+    wirePrefs(sheetBody, paintSheet);
+  };
+  (pitch.querySelector('.gear') as HTMLElement).addEventListener('click', () => {
+    paintSheet();
+    sheet.classList.add('on');
+  });
+  (pitch.querySelector('.close-sheet') as HTMLElement).addEventListener('click', () => sheet.classList.remove('on'));
   (pitch.querySelector('.pause') as HTMLElement).addEventListener('click', () => command({ a: 'pause' }));
   pitch.querySelectorAll<HTMLElement>('[data-c]').forEach((b) => b.addEventListener('click', () => command({ a: b.dataset.c } as Command)));
+  applyPrefsToPad();
   paintPad();
 }
 
